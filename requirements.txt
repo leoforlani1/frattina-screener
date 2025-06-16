@@ -5,3 +5,4 @@ matplotlib
 alpha_vantage
 arch
 scipy
+seaborn
