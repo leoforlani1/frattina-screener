@@ -2,6 +2,7 @@
 
 import streamlit as st
 import pandas as pd
+import seaborn as sns
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
@@ -320,6 +321,47 @@ def display_heatmap(df):
 
 
 # ----------------------------
+# Vol-Adjusted Moves Heatmap Screener
+# ----------------------------
+def calculate_std_devs(data):
+    data['Returns'] = data['Close'].pct_change()
+    daily_std = data['Returns'].std()
+    weekly = data['Close'].resample('W').ffill().pct_change()
+    weekly_std = weekly.std()
+    monthly = data['Close'].resample('M').ffill().pct_change()
+    monthly_std = monthly.std()
+    recent_d = data['Returns'].dropna().iloc[-1] if not data['Returns'].dropna().empty else 0
+    recent_w = weekly.dropna().iloc[-1]     if not weekly.dropna().empty else 0
+    recent_m = monthly.dropna().iloc[-1]    if not monthly.dropna().empty else 0
+    return daily_std, weekly_std, monthly_std, recent_d, recent_w, recent_m
+
+def get_vol_adj_heatmap_fig(tickers, start_date, end_date):
+    records = []
+    for t in tickers:
+        df = fetch_price_df(t, start_date, end_date)
+        if df.empty:
+            continue
+        d_std, w_std, m_std, rd, rw, rm = calculate_std_devs(df)
+        records += [
+            {'Ticker': t, 'Time Frame': 'Daily',   'σ Move': rd / d_std if d_std else np.nan},
+            {'Ticker': t, 'Time Frame': 'Weekly',  'σ Move': rw / w_std if w_std else np.nan},
+            {'Ticker': t, 'Time Frame': 'Monthly', 'σ Move': rm / m_std if m_std else np.nan},
+        ]
+    heat_df = pd.DataFrame(records).pivot(index='Time Frame', columns='Ticker', values='σ Move')
+    fig, ax = plt.subplots(figsize=(12, max(4, len(tickers) * 0.4)))
+    sns.heatmap(
+        heat_df, annot=True, fmt=".2f", cmap="RdYlGn",
+        center=0, vmin=-2, vmax=2, linewidths=0.5,
+        cbar_kws={'label': 'σ Move'}, ax=ax
+    )
+    ax.set_title("Vol-Adjusted Moves Heatmap")
+    ax.set_xlabel("Ticker")
+    ax.set_ylabel("Time Frame")
+    plt.tight_layout()
+    return fig
+
+
+# ----------------------------
 # Streamlit App Layout
 # ----------------------------
 st.set_page_config(page_title="Frattina Screener", layout="wide")
@@ -334,6 +376,20 @@ with st.sidebar:
     end_date   = st.date_input("End date",   value=pd.to_datetime("today"))
     run_button = st.button("Run Screener")
 
+    st.markdown("### Vol-Adjusted Heatmap Inputs")
+    va_tickers = st.text_input(
+        "Heatmap tickers (comma-separated)",
+        value="GBPUSD=X, EURUSD=X, GLD, USDCHF=X"
+    )
+    va_start = st.date_input(
+        "Heatmap start date", value=pd.to_datetime("2020-01-01"), key="va_start"
+    )
+    va_end = st.date_input(
+        "Heatmap end date",   value=pd.to_datetime("today"),      key="va_end"
+    )
+    run_va = st.button("Run Vol-Adjusted Heatmap")
+
+
 if run_button:
     tickers = [t.strip() for t in tickers_input.split(",") if t.strip()]
     df = build_screener(tickers, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
@@ -343,3 +399,13 @@ if run_button:
 
     st.subheader("Heatmap")
     display_heatmap(df)
+
+if 'run_va' in locals() and run_va:
+    tickers_list = [t.strip() for t in va_tickers.split(",") if t.strip()]
+    fig = get_vol_adj_heatmap_fig(
+        tickers_list,
+        va_start.strftime("%Y-%m-%d"),
+        va_end.strftime("%Y-%m-%d")
+    )
+    st.subheader("Vol-Adjusted Moves Heatmap")
+    st.pyplot(fig)
